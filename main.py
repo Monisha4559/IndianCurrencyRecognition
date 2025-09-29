@@ -1,4 +1,3 @@
-!pip install -q scikit-learn scikit-image matplotlib numpy seaborn joblib
 
 import os
 import zipfile
