@@ -1,0 +1,42 @@
+
+Class 100_rupee_note:
+  precision: 57.14%
+  recall: 100.00%
+  f1-score: 72.73%
+  support: 400.00%
+
+Class 10_rupee_note:
+  precision: 75.00%
+  recall: 75.00%
+  f1-score: 75.00%
+  support: 400.00%
+
+Class 200_rupee_note:
+  precision: 50.00%
+  recall: 25.00%
+  f1-score: 33.33%
+  support: 400.00%
+
+Class 20_rupee_note:
+  precision: 0.00%
+  recall: 0.00%
+  f1-score: 0.00%
+  support: 400.00%
+
+Class 50_rupee_note:
+  precision: 60.00%
+  recall: 75.00%
+  f1-score: 66.67%
+  support: 400.00%
+
+Class macro avg:
+  precision: 48.43%
+  recall: 55.00%
+  f1-score: 49.55%
+  support: 2000.00%
+
+Class weighted avg:
+  precision: 48.43%
+  recall: 55.00%
+  f1-score: 49.55%
+  support: 2000.00%
