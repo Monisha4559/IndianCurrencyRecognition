@@ -1,7 +1,9 @@
-# main.py
+!pip install -q scikit-learn scikit-image matplotlib numpy seaborn joblib
+
 import os
+import zipfile
 import numpy as np
-import pandas as pd
+import matplotlib.pyplot as plt
 from skimage.io import imread
 from skimage.transform import resize
 from skimage.feature import hog
@@ -16,150 +18,158 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 from sklearn.utils import resample
 from sklearn.utils.class_weight import compute_class_weight
 import seaborn as sns
-import streamlit as st
 import joblib
 
-# ------------------- Streamlit App -------------------
-st.title("Indian Currency Recognition")
+# ------------------- Paths -------------------
+DATA_ZIP = "demo_currency_dataset.zip"  # Path to your zip
+WORK_DIR = "demo_currency_dataset"
+MODEL_PATH = "currency_pipeline.pkl"
+CONF_MATRIX_PATH = "confusion_matrix.png"
 
-# Upload dataset
-uploaded_zip = st.file_uploader("Upload demo_currency_dataset.zip", type="zip")
-if uploaded_zip:
-    import zipfile
-    import tempfile
+# ------------------- Unzip dataset -------------------
+if not os.path.exists(WORK_DIR):
+    with zipfile.ZipFile(DATA_ZIP, 'r') as zip_ref:
+        zip_ref.extractall(".")
+print(f"✅ Dataset unzipped to {WORK_DIR}")
 
-    temp_dir = tempfile.TemporaryDirectory()
-    with zipfile.ZipFile(uploaded_zip, "r") as zip_ref:
-        zip_ref.extractall(temp_dir.name)
+# ------------------- Find the correct dataset folder -------------------
+dataset_dir = WORK_DIR
+# If zip extracted an extra folder level, handle it
+subfolders = [f for f in os.listdir(WORK_DIR) if os.path.isdir(os.path.join(WORK_DIR, f))]
+if len(subfolders) == 1 and subfolders[0].startswith("demo_currency_dataset"):
+    dataset_dir = os.path.join(WORK_DIR, subfolders[0])
 
-    DATA_DIR = os.path.join(temp_dir.name, "demo_currency_dataset")
-    st.success(f"Dataset extracted to {DATA_DIR}")
+print(f"Using dataset folder: {dataset_dir}")
 
-    # ------------------- Load & preprocess images -------------------
-    X, y = [], []
-    target_size = (64, 64)
+# ------------------- Load & preprocess images -------------------
+X, y = [], []
+target_size = (64, 64)
 
-    for label in os.listdir(DATA_DIR):
-        folder = os.path.join(DATA_DIR, label)
-        if not os.path.isdir(folder):
+for label in os.listdir(dataset_dir):
+    folder = os.path.join(dataset_dir, label)
+    if not os.path.isdir(folder):
+        continue
+    for file in os.listdir(folder):
+        img_path = os.path.join(folder, file)
+        if not os.path.isfile(img_path):
             continue
-        for file in os.listdir(folder):
-            img_path = os.path.join(folder, file)
-            if not os.path.isfile(img_path):
-                continue
-            try:
-                img = imread(img_path, as_gray=True)
-                img_resized = resize(img, target_size, anti_aliasing=True)
-                features = hog(
-                    img_resized,
-                    orientations=9,
-                    pixels_per_cell=(8, 8),
-                    cells_per_block=(2, 2),
-                    block_norm="L2-Hys"
-                )
-                X.append(features)
-                y.append(label)
-            except Exception as e:
-                st.warning(f"Skipping {img_path}: {e}")
+        try:
+            img = imread(img_path, as_gray=True)
+            img_resized = resize(img, target_size, anti_aliasing=True)
+            features = hog(
+                img_resized,
+                orientations=9,
+                pixels_per_cell=(8, 8),
+                cells_per_block=(2, 2),
+                block_norm="L2-Hys"
+            )
+            X.append(features)
+            y.append(label)
+        except Exception as e:
+            print(f"⚠️ Skipping {img_path}, not a valid image")
 
-    X = np.array(X)
-    y = np.array(y)
+X = np.array(X)
+y = np.array(y)
 
-    if len(X) == 0:
-        st.error("No images loaded! Check the dataset structure.")
-    else:
-        st.success(f"Loaded {len(X)} images.")
+if len(X) == 0:
+    raise ValueError("No images loaded! Check your zip file and folder structure.")
+print(f"✅ Feature matrix: {X.shape}, Labels: {len(y)}")
 
-        # ------------------- Train/Test Split -------------------
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, stratify=y, random_state=42
-        )
+# ------------------- Train/Test Split -------------------
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, stratify=y, random_state=42
+)
+print("Train:", X_train.shape, "Test:", X_test.shape)
 
-        # ------------------- Balance classes -------------------
-        classes = np.unique(y_train)
-        max_count = max([np.sum(y_train == cls) for cls in classes])
-        X_train_balanced, y_train_balanced = [], []
-        for cls in classes:
-            X_cls = X_train[y_train == cls]
-            y_cls = y_train[y_train == cls]
-            X_resampled, y_resampled = resample(X_cls, y_cls,
-                                                replace=True,
-                                                n_samples=max_count,
-                                                random_state=42)
-            X_train_balanced.append(X_resampled)
-            y_train_balanced.append(y_resampled)
+# ------------------- Balance classes -------------------
+classes = np.unique(y_train)
+max_count = max([np.sum(y_train == cls) for cls in classes])
+X_train_balanced, y_train_balanced = [], []
+for cls in classes:
+    X_cls = X_train[y_train == cls]
+    y_cls = y_train[y_train == cls]
+    X_resampled, y_resampled = resample(X_cls, y_cls, replace=True, n_samples=max_count, random_state=42)
+    X_train_balanced.append(X_resampled)
+    y_train_balanced.append(y_resampled)
 
-        X_train = np.vstack(X_train_balanced)
-        y_train = np.hstack(y_train_balanced)
+X_train = np.vstack(X_train_balanced)
+y_train = np.hstack(y_train_balanced)
+print("Balanced Train:", X_train.shape)
 
-        # ------------------- Class weights -------------------
-        class_weights_dict = dict(zip(
-            classes,
-            compute_class_weight(class_weight='balanced', classes=classes, y=y_train)
-        ))
+# ------------------- Class weights -------------------
+class_weights_dict = dict(zip(
+    classes,
+    compute_class_weight(class_weight='balanced', classes=classes, y=y_train)
+))
+print("Class weights:", class_weights_dict)
 
-        # ------------------- Models -------------------
-        models = {
-            "SVC_rbf": (SVC(probability=True, class_weight=class_weights_dict), {
-                "clf__C": [1, 10],
-                "clf__gamma": ["scale", 0.01]
-            }),
-            "RandomForest": (RandomForestClassifier(random_state=42, class_weight=class_weights_dict), {
-                "clf__n_estimators": [100, 200],
-                "clf__max_depth": [None, 20]
-            }),
-            "KNN": (KNeighborsClassifier(), {
-                "clf__n_neighbors": [3, 5]
-            })
-        }
+# ------------------- Define models & grids -------------------
+models = {
+    "SVC_rbf": (SVC(probability=True, class_weight=class_weights_dict), {
+        "clf__C": [1, 10],
+        "clf__gamma": ["scale", 0.01]
+    }),
+    "RandomForest": (RandomForestClassifier(random_state=42, class_weight=class_weights_dict), {
+        "clf__n_estimators": [100, 200],
+        "clf__max_depth": [None, 20]
+    }),
+    "KNN": (KNeighborsClassifier(), {
+        "clf__n_neighbors": [3, 5]
+    })
+}
 
-        results = []
-        best_model = None
-        best_acc = 0
+# ------------------- Train & Evaluate -------------------
+results = []
+best_model = None
+best_acc = 0
 
-        st.info("Training models... this may take a few minutes.")
+for name, (clf, grid) in models.items():
+    print(f"\n🔍 Training {name} ...")
+    pipe = Pipeline([
+        ("scaler", StandardScaler()),
+        ("pca", PCA(n_components=0.95, random_state=42)),
+        ("clf", clf)
+    ])
+    cv = StratifiedKFold(n_splits=4, shuffle=True, random_state=42)
+    gs = GridSearchCV(pipe, grid, cv=cv, scoring="accuracy", n_jobs=-1)
+    gs.fit(X_train, y_train)
 
-        for name, (clf, grid) in models.items():
-            pipe = Pipeline([
-                ("scaler", StandardScaler()),
-                ("pca", PCA(n_components=0.95, random_state=42)),
-                ("clf", clf)
-            ])
-            cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
-            gs = GridSearchCV(pipe, grid, cv=cv, scoring="accuracy", n_jobs=-1)
-            gs.fit(X_train, y_train)
-            best_pipe = gs.best_estimator_
-            cv_mean = gs.best_score_
-            test_acc = accuracy_score(y_test, best_pipe.predict(X_test))
-            results.append({"Model": name, "CV Mean": cv_mean, "Test Acc": test_acc})
+    best_pipe = gs.best_estimator_
+    cv_mean = gs.best_score_
+    test_acc = accuracy_score(y_test, best_pipe.predict(X_test))
 
-            if test_acc > best_acc:
-                best_acc = test_acc
-                best_model = best_pipe
+    results.append({"name": name, "cv_mean": cv_mean, "test_acc": test_acc})
 
-        # ------------------- Show Results -------------------
-        st.subheader("Model Performance")
-        df_results = pd.DataFrame(results)
-        df_results["CV Mean"] = df_results["CV Mean"].apply(lambda x: f"{x*100:.2f}%")
-        df_results["Test Acc"] = df_results["Test Acc"].apply(lambda x: f"{x*100:.2f}%")
-        st.dataframe(df_results)
+    if test_acc > best_acc:
+        best_acc = test_acc
+        best_model = best_pipe
 
-        # ------------------- Classification Report -------------------
-        y_pred = best_model.predict(X_test)
-        report = classification_report(y_test, y_pred, output_dict=True)
-        st.subheader("Classification Report")
-        report_df = pd.DataFrame(report).transpose()
-        report_df = report_df.applymap(lambda x: f"{x*100:.2f}%" if isinstance(x, float) else x)
-        st.dataframe(report_df)
+# ------------------- Report Results -------------------
+print("\n📊 Model Performance:")
+print(f"{'Model':<15} {'CV Mean':<10} {'Test Acc':<10}")
+for res in results:
+    print(f"{res['name']:<15} {res['cv_mean']*100:>6.2f}%   {res['test_acc']*100:>6.2f}%")
 
-        # ------------------- Confusion Matrix -------------------
-        st.subheader("Confusion Matrix")
-        cm = confusion_matrix(y_test, y_pred)
-        cm_df = pd.DataFrame(cm, index=classes, columns=classes)
-        st.dataframe(cm_df)
+joblib.dump(best_model, MODEL_PATH)
+print(f"\n🏆 Best model saved: {type(best_model.named_steps['clf']).__name__}")
 
-        # ------------------- Save Model -------------------
-        save_path = st.text_input("Enter filename to save best model (e.g., currency_model.pkl)", "currency_model.pkl")
-        if st.button("Save Model"):
-            joblib.dump(best_model, save_path)
-            st.success(f"Model saved as {save_path}")
+# ------------------- Classification Report -------------------
+y_pred = best_model.predict(X_test)
+report = classification_report(y_test, y_pred, output_dict=True)
+print("\n📑 Classification Report (in %):")
+for label, metrics in report.items():
+    if isinstance(metrics, dict):
+        print(f"\nClass {label}:")
+        for m, v in metrics.items():
+            print(f"  {m}: {v*100:.2f}%")
+
+# ------------------- Confusion Matrix -------------------
+cm = confusion_matrix(y_test, y_pred)
+plt.figure(figsize=(8,6))
+sns.heatmap(cm, annot=True, fmt="d", cmap="Blues",
+            xticklabels=classes, yticklabels=classes)
+plt.xlabel("Predicted")
+plt.ylabel("True")
+plt.title("Confusion Matrix")
+plt.savefig(CONF_MATRIX_PATH)
+plt.show()
